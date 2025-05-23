@@ -1,41 +1,62 @@
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
+import datetime 
 
 st.set_page_config(page_title="Simulación", layout="wide")
 st.title("📊 Simulación de Estrategia")
 
-# Verificar si hay datos cargados y señales generadas
-if 'df' not in st.session_state or st.session_state.df is None:
-    st.warning("Por favor, sube un archivo CSV y entrena el modelo en la página principal.")
-    st.stop()
-
-df_total = st.session_state.df.copy()
-if 'Señal' not in df_total.columns:
-    st.error("⚠️ No se han generado señales todavía. Ve a la página principal y entrena el modelo.")
-    st.stop()
-
-# Selección de activo si hay múltiples
-if 'Ticker' in df_total.columns:
-    tickers = df_total['Ticker'].unique()
-    ticker_seleccionado = st.selectbox("Selecciona el activo", tickers)
-    df = df_total[df_total['Ticker'] == ticker_seleccionado].copy()
+# Caso 1: múltiples activos (diccionario dfs_por_ticker)
+if 'dfs_por_ticker' in st.session_state and st.session_state.dfs_por_ticker:
+    tickers = list(st.session_state.dfs_por_ticker.keys())
+    ticker_seleccionado = st.selectbox("Selecciona el activo para simular", tickers)
+    df = st.session_state.dfs_por_ticker[ticker_seleccionado].copy()
+# Caso 2: un único activo sin columna Ticker
+elif 'df' in st.session_state and st.session_state.df is not None:
+    df = st.session_state.df.copy()
+    if 'Ticker' in df.columns:
+        # Por si acaso, filtro único ticker aunque no hay dfs_por_ticker
+        tickers = df['Ticker'].unique()
+        ticker_seleccionado = st.selectbox("Selecciona el activo para simular", tickers)
+        df = df[df['Ticker'] == ticker_seleccionado].copy()
+    else:
+        ticker_seleccionado = "Activo único"
 else:
-    df = df_total.copy()
+    st.warning("Por favor, genera las señales en la página principal primero.")
+    st.stop()
 
 # Asegurar tipos correctos
 df['Fecha'] = pd.to_datetime(df['Fecha'])
 df['Señal'] = df['Señal'].astype(str)
 
-# Inputs en la barra lateral
-spread = st.sidebar.number_input("Spread (en puntos)", min_value=0.0, value=st.session_state.get("spread", 0.0), step=0.01, key="spread_sim")
-comision = st.sidebar.number_input("Comisión fija (en €)", min_value=0.0, value=st.session_state.get("comision", 0.0), step=0.1, key="comision_sim")
-capital_inicial = st.sidebar.number_input("Capital inicial (€)", min_value=100.0, value=1000.0, step=100.0, key="capital_inicial_sim")
+# Sidebar inputs con valores guardados o por defecto
+spread = st.sidebar.number_input(
+    "Spread (en puntos)",
+    min_value=0.0,
+    value=st.session_state.get("spread_input", 0.0),
+    step=0.01,
+    key="spread_sim"
+)
+comision = st.sidebar.number_input(
+    "Comisión fija (en €)",
+    min_value=0.0,
+    value=st.session_state.get("comision_input", 0.0),
+    step=0.1,
+    key="comision_sim"
+)
+capital_inicial = st.sidebar.number_input(
+    "Capital inicial (€)",
+    min_value=100.0,
+    value=1000.0,
+    step=100.0,
+    key="capital_inicial_sim"
+)
 
-st.session_state.spread = spread
-st.session_state.comision = comision
+# Guardar en session_state para persistencia y sincronización
+st.session_state["spread_input"] = spread
+st.session_state["comision_input"] = comision
 
-# Mostrar info
+# Mostrar info en sidebar
 st.sidebar.markdown("---")
 st.sidebar.markdown("### ℹ️ Costes aplicados")
 st.sidebar.markdown(f"- Spread actual: `{spread}` puntos")
@@ -43,11 +64,9 @@ st.sidebar.markdown(f"- Comisión actual: `{comision} €`")
 st.sidebar.markdown(f"- Capital inicial: `{capital_inicial} €`")
 
 # Selección de año
-años_disponibles = sorted(df['Fecha'].dt.year.dropna().unique(), reverse=True)
-año_seleccionado = st.selectbox("Selecciona el año para la simulación", años_disponibles)
 
-df_sim = df[df['Fecha'].dt.year == año_seleccionado].reset_index(drop=True)
-
+año_actual = datetime.datetime.now().year
+df_sim = df[df['Fecha'].dt.year == año_actual].reset_index(drop=True)
 # Simulación con interés compuesto
 capital = capital_inicial
 en_posicion = False
@@ -116,7 +135,7 @@ ganancia_max = ((precio_maximo - precio_inicio) / precio_inicio) * capital_inici
 capital_max = capital_inicial + ganancia_max
 
 # Resultados
-st.subheader(f"📈 Evolución del Capital en {año_seleccionado}")
+st.subheader(f"📈 Evolución del Capital en {año_actual} ({ticker_seleccionado})")
 
 if transacciones:
     df_transacciones = pd.DataFrame(transacciones)
@@ -143,4 +162,5 @@ else:
 # Botón para resetear
 if st.button("❌ Quitar archivo cargado y reiniciar"):
     st.session_state.df = None
+    st.session_state.dfs_por_ticker = {}
     st.rerun()

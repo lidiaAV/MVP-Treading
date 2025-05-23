@@ -47,7 +47,7 @@ if fuente == "📤 Subir archivo CSV":
 # === Opción 2: Yahoo Finance individual ===
 elif fuente == "🌐 Yahoo Finance - Individual":
     ticker = st.text_input("Introduce el ticker (ej: AAPL, SAN.MC):", "SAN.MC")
-    periodo = st.selectbox("Periodo:", ["6mo", "1y", "2y", "5y", "10y"])
+    periodo = st.selectbox("Periodo:", ["2y", "5y", "10y"])
     intervalo = st.selectbox("Intervalo:", ["1d", "1wk", "1mo"])
     if st.button("📥 Descargar datos del ticker"):
         data = yf.download(ticker, period=periodo, interval=intervalo)
@@ -80,7 +80,7 @@ elif fuente == "🌐 Yahoo Finance - Individual":
 # === Opción 3: Yahoo Finance por índice ===
 elif fuente == "🌐 Yahoo Finance - Índice":
     indice = st.selectbox("Selecciona un índice:", list(indices.keys()))
-    periodo = st.selectbox("Periodo:", ["6mo", "1y", "2y"])
+    periodo = st.selectbox("Periodo:", ["2y", "5y", "10y"])
     intervalo = st.selectbox("Intervalo:", ["1d", "1wk", "1mo"])
 
     if st.button("📥 Descargar datos del índice"):

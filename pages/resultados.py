@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split
 
 st.set_page_config(page_title="Resultados", layout="wide")
 st.title("📊 Resultados de hoy")
@@ -21,7 +20,7 @@ if "df" not in st.session_state:
     st.warning("🔁 Carga los datos desde la página principal primero.")
     st.stop()
 
-df = st.session_state.df
+df = st.session_state.df.copy()
 
 # Inicializar diccionario para guardar análisis por ticker
 if "dfs_por_ticker" not in st.session_state:
@@ -35,27 +34,49 @@ if "Ticker" in df.columns:
     for ticker in df["Ticker"].unique():
         df_t = df[df["Ticker"] == ticker].copy()
 
-        delta = df_t['Último'].diff()
+        # Año máximo en datos de este ticker
+        ultimo_año = df_t['Fecha'].dt.year.max()
+
+        # Entrenar solo con datos hasta el año anterior
+        df_train = df_t[df_t['Fecha'].dt.year < ultimo_año].copy()
+        if df_train.empty or len(df_train) < 10:
+            continue
+
+        # Calcular indicadores para df_train
+        delta = df_train['Último'].diff()
         gain = delta.clip(lower=0)
         loss = -delta.clip(upper=0)
         avg_gain = gain.rolling(window=5).mean()
         avg_loss = loss.rolling(window=5).mean()
         rs = avg_gain / avg_loss
-        df_t['RSI'] = 100 - (100 / (1 + rs))
+        df_train['RSI'] = 100 - (100 / (1 + rs))
+
+        df_train['Target'] = ((df_train['Último'].shift(-1) - (df_train['Último'] + spread)) > 0).astype(int)
+        df_train.dropna(subset=['RSI', 'Vol.', 'Target'], inplace=True)
+
+        if len(df_train) < 10:
+            continue
+
+        X = df_train[['RSI', 'Vol.']]
+        y = df_train['Target']
+        model = RandomForestClassifier(n_estimators=100, random_state=42)
+        model.fit(X, y)
+
+        # Ahora calculamos indicadores y predecimos en todo df_t (incluye último año)
+        delta_all = df_t['Último'].diff()
+        gain_all = delta_all.clip(lower=0)
+        loss_all = -delta_all.clip(upper=0)
+        avg_gain_all = gain_all.rolling(window=5).mean()
+        avg_loss_all = loss_all.rolling(window=5).mean()
+        rs_all = avg_gain_all / avg_loss_all
+        df_t['RSI'] = 100 - (100 / (1 + rs_all))
 
         df_t['Target'] = ((df_t['Último'].shift(-1) - (df_t['Último'] + spread)) > 0).astype(int)
         df_t.dropna(subset=['RSI', 'Vol.', 'Target'], inplace=True)
 
-        if len(df_t) < 10:
-            continue
-
-        X = df_t[['RSI', 'Vol.']]
-        y = df_t['Target']
-        model = RandomForestClassifier(n_estimators=100, random_state=42)
-        model.fit(X, y)
-
-        df_t['Predicción'] = model.predict(X)
+        df_t['Predicción'] = model.predict(df_t[['RSI', 'Vol.']])
         df_t['Señal'] = df_t['Predicción'].apply(lambda x: '📈 Comprar' if x == 1 else '📉 Vender')
+
         ultima = df_t.iloc[-1]
 
         resumen.append({
@@ -86,36 +107,68 @@ if "Ticker" in df.columns:
         st.warning("No se ha generado el análisis para este activo todavía.")
         st.stop()
 
+# === Caso de un único activo (sin columna Ticker) ===
+else:
+    st.subheader("📋 Resumen de señales de hoy")
+
+    ultimo_año = df['Fecha'].dt.year.max()
+    df_train = df[df['Fecha'].dt.year < ultimo_año].copy()
+
+    delta = df_train['Último'].diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.rolling(window=5).mean()
+    avg_loss = loss.rolling(window=5).mean()
+    rs = avg_gain / avg_loss
+    df_train['RSI'] = 100 - (100 / (1 + rs))
+
+    df_train['Target'] = ((df_train['Último'].shift(-1) - (df_train['Último'] + spread)) > 0).astype(int)
+    df_train.dropna(subset=['RSI', 'Vol.', 'Target'], inplace=True)
+
+    if len(df_train) < 10:
+        st.warning("No hay suficientes datos para entrenar el modelo.")
+        st.stop()
+
+    X = df_train[['RSI', 'Vol.']]
+    y = df_train['Target']
+    model = RandomForestClassifier(n_estimators=100, random_state=42)
+    model.fit(X, y)
+
+    # Predecir en todo df (incluyendo último año)
+    delta_all = df['Último'].diff()
+    gain_all = delta_all.clip(lower=0)
+    loss_all = -delta_all.clip(upper=0)
+    avg_gain_all = gain_all.rolling(window=5).mean()
+    avg_loss_all = loss_all.rolling(window=5).mean()
+    rs_all = avg_gain_all / avg_loss_all
+    df['RSI'] = 100 - (100 / (1 + rs_all))
+
+    df['Target'] = ((df['Último'].shift(-1) - (df['Último'] + spread)) > 0).astype(int)
+    df.dropna(subset=['RSI', 'Vol.', 'Target'], inplace=True)
+
+    df['Predicción'] = model.predict(df[['RSI', 'Vol.']])
+    df['Señal'] = df['Predicción'].apply(lambda x: '📈 Comprar' if x == 1 else '📉 Vender')
+
+    ultima = df.iloc[-1]
+
+    resumen = {
+        "Fecha": ultima["Fecha"].date(),
+        "Precio": round(ultima["Último"], 2),
+        "RSI": round(ultima["RSI"], 2),
+        "Volumen": round(ultima["Vol."], 0),
+        "Señal": ultima["Señal"]
+    }
+    st.dataframe(pd.DataFrame([resumen]))
+
+    st.session_state.dfs_por_ticker = {"_único": df}  # Guarda el df para simulación
+
 # === Análisis detallado ===
 st.markdown("## 📌 Señal para hoy")
 
-delta = df['Último'].diff()
-gain = delta.clip(lower=0)
-loss = -delta.clip(upper=0)
-avg_gain = gain.rolling(window=5).mean()
-avg_loss = loss.rolling(window=5).mean()
-rs = avg_gain / avg_loss
-df['RSI'] = 100 - (100 / (1 + rs))
-
-df['Target'] = ((df['Último'].shift(-1) - (df['Último'] + spread)) > 0).astype(int)
-df.dropna(subset=['RSI', 'Vol.', 'Target'], inplace=True)
-
-X = df[['RSI', 'Vol.']]
-y = df['Target']
-model = RandomForestClassifier(n_estimators=100, random_state=42)
-model.fit(X, y)
-
-df['Predicción'] = model.predict(X)
-df['Señal'] = df['Predicción'].apply(lambda x: '📈 Comprar' if x == 1 else '📉 Vender')
-
-ultima_fila = df.iloc[-1]
-st.markdown(f"### 👉 Para el día **{ultima_fila['Fecha'].date()}**, la recomendación es: **{ultima_fila['Señal']}**")
-
-
-# Gráfico RSI vs Precio
-st.subheader("📊 RSI vs Precio")
 dias = st.slider("¿Cuántos días mostrar?", 30, 180, 90)
+
 df_viz = df.tail(dias)
+
 fig, ax1 = plt.subplots(figsize=(12, 5))
 line1, = ax1.plot(df_viz['Fecha'], df_viz['RSI'], color='blue', label='RSI')
 ax1.axhline(70, color='red', linestyle='--')
